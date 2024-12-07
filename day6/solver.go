@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 var INPUT_FILE = "./input.txt"
@@ -160,8 +162,9 @@ func printArray(array [][]uint8) {
 	}
 }
 
-func checkLoopForObstruction(mapa [][]uint8, initialStance Stance) (isLoop bool) {
-	isLoop = false
+func checkLoopForObstruction(mapa [][]uint8, initialStance Stance, wg *sync.WaitGroup, c1 chan bool) {
+	isLoop := false
+	defer wg.Done()
 
 	currentStance := initialStance
 	previousObstaculatedStances := make([]Stance, 0, 500)
@@ -170,32 +173,53 @@ func checkLoopForObstruction(mapa [][]uint8, initialStance Stance) (isLoop bool)
 		if currentStance.obstacled {
 			for _, obstacle := range previousObstaculatedStances {
 				if obstacle.x == currentStance.x && obstacle.y == currentStance.y && obstacle.stance == currentStance.stance {
-					return true
+					isLoop = true
+					break
 				}
+			}
+			if isLoop {
+				break
 			}
 			previousObstaculatedStances = append(previousObstaculatedStances, currentStance)
 		}
 		currentStance = nextStance
 	}
-	return
+	c1 <- isLoop
 }
 
 func sweepMapWithObstructions(mapa [][]uint8, initialStance Stance) (loopCasesCount int) {
 	loopCasesCount = 0
 	frontOfGuardInitialStance := getNextStance(&initialStance, mapa)
+	var c1 = make(chan bool, 16111)
 
+	wg := new(sync.WaitGroup)
 	for y, row := range mapa {
 		for x, _ := range row {
 			if foundObstacle(Stance{x: x, y: y}, mapa) || (x == frontOfGuardInitialStance.x && y == frontOfGuardInitialStance.y) {
 				continue
 			}
-			temp := mapa[y][x]
-			mapa[y][x] = 'O'
-			// printArray(mapa)
-			if checkLoopForObstruction(mapa, initialStance) {
-				loopCasesCount++
+            mappedMap := make([][]uint8, len(mapa))
+			for i := range mapa {
+				mappedMap[i] = make([]uint8, len(mapa[i]))
+				copy(mappedMap[i], mapa[i])
 			}
-			mapa[y][x] = temp
+			// temp := mappedMap[y][x]
+			mappedMap[y][x] = 'O'
+			// printArray(mapa)
+			wg.Add(1)
+			go checkLoopForObstruction(mappedMap, initialStance, wg, c1)
+
+			// if <-c1 {
+			// 	loopCasesCount++
+			// }
+			// mapa[y][x] = temp
+		}
+	}
+	wg.Wait()
+	close(c1)
+	for b := range c1 {
+		if b {
+			loopCasesCount++
 		}
 	}
 	return
@@ -213,6 +237,10 @@ func solvePart2(filePath string) int {
 }
 
 func main() {
+
+    GOMAXPROCS := 16
+    fmt.Println("GOMAXPROCS", GOMAXPROCS)
+	runtime.GOMAXPROCS(GOMAXPROCS)
 	// solution1 := solvePart1(INPUT_FILE_TEST)
 	// solution1 := solvePart1(INPUT_FILE)
 	// solution2 := solvePart2(INPUT_FILE_TEST)
